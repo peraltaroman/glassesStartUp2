@@ -1,18 +1,19 @@
 [hidden]{display:none!important}
 
-/* VOICE: calm and clinical, like a good optical shop's fitting desk.
-   IDEA: the optician's frame board: a face under a lens, frames racked and ranked beside it.
-   PICTURE: the try-on stage: the patient's photo (or a face outline that changes with face shape) wearing the selected frame.
-   COLOUR and TYPE: white ground, near-black ink, ultramarine accent for match scores; Instrument Sans titles, Inter body.
-   LAYOUT: stage and profile on the left, ranked rack on the right; practice settings in a full band below. */
-:root{color-scheme:light dark;
---bg:light-dark(#ffffff,#0c0e1a);--panel:light-dark(#f4f5fb,#151829);--line:light-dark(#e2e4ee,#262a42);
---ink:light-dark(#101418,#eceef8);--mute:light-dark(#5b6170,#a0a6bd);
---acc:light-dark(#2335e0,#8f9bff);--accbg:light-dark(#eef0ff,#1c2150);
---ok:light-dark(#0d6b3f,#7fdcaa);--okbg:light-dark(#e6f5ec,#123526);
---warn:light-dark(#8a4b00,#ffc47a);--warnbg:light-dark(#fff3e2,#3a2a12);
---bad:light-dark(#9b1c2c,#ff9aa8)}
-:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
+/* Brand palette
+   Deep Botanical #1F4235  primary brand: navigation, primary buttons, key brand moments
+   Warm Sage      #5C7F71  secondary buttons, active states, data bars and lines
+   Soft Terracotta#D97D54  call-to-action highlights, "best match" badges, key data callouts
+   Warm Alabaster #FAF8F5  page background
+   Oatmeal Sand   #EFECE6  cards, comparison containers, section dividers
+   Charcoal Ink   #1C2421  headings and body text
+   Slate Moss     #5A6661  subtitles, captions, secondary metadata */
+:root{color-scheme:light;
+--brand:#1F4235;--sage:#5C7F71;--terra:#D97D54;--terraInk:#9C4D28;
+--bg:#FAF8F5;--panel:#EFECE6;--line:#E0DBD2;--ink:#1C2421;--mute:#5A6661;
+--acc:#5C7F71;--accbg:#E3EBE7;
+--ok:#1F4235;--okbg:#DCE7E1;--warn:#9C4D28;--warnbg:#F7E4DA;--bad:#A43A2A}
+:root[data-theme]{color-scheme:light}
 *{box-sizing:border-box;min-width:0}
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 Inter,system-ui,sans-serif;overflow-x:clip}
 h1,h2,h3{font-family:"Instrument Sans",Inter,sans-serif;line-height:1.1;margin:0;text-wrap:balance}
@@ -30,16 +31,18 @@ h3{font-size:16px;font-weight:600}
 .stage canvas{position:absolute;inset:0;width:100%;height:100%}
 #gl{pointer-events:none;filter:drop-shadow(0 3px 3px rgba(0,0,0,.35))}
 #spin{min-height:36px;border:0}
-#spin[aria-pressed=true]{background:var(--ink);color:var(--bg)}
+#spin[aria-pressed=true]{background:var(--sage);color:#fff}
 .stagebar{z-index:2}
 .stagebar{position:absolute;left:12px;right:12px;bottom:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
 .pill{background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(6px);border-radius:999px;padding:6px 12px;font-size:14px}
 button,.btn,select,input{font:inherit;font-size:16px;color:inherit}
-button,.btn{min-height:44px;border-radius:10px;border:1px solid var(--line);background:var(--bg);padding:0 16px;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
-.primary{background:var(--acc);border-color:var(--acc);color:#fff}
-:root[data-theme=dark] .primary{color:#0c0e1a}
-@media(prefers-color-scheme:dark){:root:not([data-theme=light]) .primary{color:#0c0e1a}}
-button:focus-visible,.btn:focus-within,select:focus-visible,input:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+button,.btn{min-height:44px;border-radius:10px;border:1px solid var(--line);background:#fff;color:var(--brand);padding:0 16px;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.primary:hover{background:#173328}
+.secondary{background:var(--sage);border-color:var(--sage);color:#fff}
+.cta{background:var(--terra);border-color:var(--terra);color:#1C2421;font-weight:600}
+button:not(.primary):not(.secondary):not(.cta):not(.chip):hover{border-color:var(--sage)}
+button:focus-visible,.btn:focus-within,select:focus-visible,input:focus-visible{outline:3px solid var(--terra);outline-offset:2px}
 input[type=file]{position:absolute;opacity:0;width:1px;height:1px}
 select,input[type=number],input[type=text]{min-height:44px;border:1px solid var(--line);border-radius:10px;background:var(--bg);padding:0 10px}
 .status{font-size:14px;color:var(--mute);margin:10px 2px 0;min-height:22px}
@@ -49,7 +52,7 @@ select,input[type=number],input[type=text]{min-height:44px;border:1px solid var(
 .plabel{font-size:14px;color:var(--mute);margin-bottom:6px;display:flex;gap:8px;align-items:center}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chip{min-height:38px;padding:0 12px;border-radius:999px;font-size:14px}
-.chip[aria-pressed=true]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.chip[aria-pressed=true]{background:var(--sage);color:#fff;border-color:var(--sage)}
 .det{font-size:12px;padding:2px 8px;border-radius:999px;background:var(--accbg);color:var(--acc)}
 .swatch{width:22px;height:22px;border-radius:50%;border:1px solid var(--line);display:inline-block;vertical-align:middle}
 details{font-size:14px;color:var(--mute)}
@@ -60,14 +63,15 @@ details summary{cursor:pointer;min-height:32px}
 .toggle input{width:20px;height:20px;accent-color:var(--acc)}
 .count{font-size:14px;color:var(--mute);margin:0 0 10px}
 .rack{display:grid;gap:10px}
-.card{display:grid;grid-template-columns:150px minmax(0,1fr) auto;gap:4px 16px;align-items:center;border:1px solid var(--line);border-radius:14px;padding:12px 14px;background:var(--bg)}
-.card.sel{border-color:var(--acc);box-shadow:0 0 0 2px var(--acc) inset}
+.card{display:grid;grid-template-columns:150px minmax(0,1fr) auto;gap:4px 16px;align-items:center;border:1px solid var(--line);border-radius:14px;padding:12px 14px;background:var(--panel)}
+.card.sel{border-color:var(--brand);box-shadow:0 0 0 2px var(--brand) inset}
+.best{display:inline-block;background:var(--terra);color:#1C2421;font-size:12px;font-weight:600;padding:2px 9px;border-radius:999px;margin-left:6px;vertical-align:2px}
 .card canvas{width:150px;height:64px}
 .cname{font-weight:600}
 .cmeta{font-size:14px;color:var(--mute)}
 .why{font-size:13px;color:var(--mute);margin-top:2px}
 .right{display:flex;flex-direction:column;align-items:flex-end;gap:6px;text-align:right}
-.score{font-family:"Instrument Sans",sans-serif;font-size:26px;font-weight:700;color:var(--acc);line-height:1}
+.score{font-family:"Instrument Sans",sans-serif;font-size:26px;font-weight:700;color:var(--brand);line-height:1}
 .score small{font-size:13px;font-weight:500;color:var(--mute)}
 .tag{font-size:13px;padding:3px 9px;border-radius:999px;white-space:nowrap}
 .tag.ok{background:var(--okbg);color:var(--ok)}.tag.warn{background:var(--warnbg);color:var(--warn)}
@@ -118,3 +122,16 @@ pre,.scroll{overflow-x:auto}
 .mixrow b{font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
 #faceTrace{width:90px;height:112px;flex:none}
 #faceTrace path{fill:var(--accbg);stroke:var(--acc);stroke-width:1.5}
+
+/* navigation */
+.nav{background:var(--brand);color:#fff}
+.nav .wrap{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 20px;padding:12px max(5vw,16px)}
+.brandmark{font-family:"Instrument Sans",sans-serif;font-weight:700;font-size:20px;letter-spacing:.01em;color:#fff;text-decoration:none;display:flex;align-items:center;gap:10px}
+.brandmark svg{width:34px;height:16px}
+.nav nav{display:flex;flex-wrap:wrap;gap:4px}
+.nav nav a{color:#E3EBE7;text-decoration:none;font-size:15px;padding:10px 12px;border-radius:8px;min-height:44px;display:inline-flex;align-items:center}
+.nav nav a:hover,.nav nav a:focus-visible{background:rgba(255,255,255,.1);color:#fff;outline:none}
+.top h1{color:var(--brand)}
+.settings{border-top:1px solid var(--line)}
+.settings .tblwrap{background:#fff}
+#gate h2{color:var(--brand)}

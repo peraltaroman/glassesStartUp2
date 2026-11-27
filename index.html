@@ -9,18 +9,24 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<header class="nav">
+  <div class="wrap">
+    <a class="brandmark" href="#tryon-section"><svg viewBox="0 0 34 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="#D97D54" stroke-width="2.2"/><circle cx="26" cy="8" r="6.5" fill="none" stroke="#fff" stroke-width="2.2"/><path d="M14.5 7c1.5-1.6 3.5-1.6 5 0" fill="none" stroke="#fff" stroke-width="2"/></svg>Frame Match</a>
+    <nav aria-label="Sections"><a href="#tryon-section">Try on</a><a href="#frames">Frames</a><a href="#practice">Practice settings</a></nav>
+  </div>
+</header>
 
-<header class="band top wrap">
+<div class="band top wrap">
   <div>
-    <h1>Frame match</h1>
+    <h1>Find the frames that fit</h1>
     <p>Live try-on: the camera tracks the patient's face in 3D, ranks the frames this practice has in stock by face shape and skin tone, and shows what their vision plan covers.</p>
   </div>
   <span class="sample">Prototype · sample catalog, brands and plan values</span>
-</header>
+</div>
 
 <main class="band wrap" style="padding-top:20px">
   <div class="grid">
-    <section aria-label="Try-on and patient profile">
+    <section aria-label="Try-on and patient profile" id="tryon-section">
       <div class="stage" id="stage">
         <video id="cam" playsinline muted autoplay hidden></video>
         <canvas id="tryon" aria-label="Try-on preview"></canvas>
@@ -40,7 +46,7 @@
         </div>
         <div class="stagebar">
           <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button id="snap" class="primary" hidden>Snapshot</button>
+            <button id="snap" class="cta" hidden>Snapshot</button>
             <button id="stopCam" hidden>Stop camera</button>
             <button id="openGate" hidden>Camera / photo</button>
             <button id="spin" class="pill btnpill" hidden aria-pressed="false">3D view</button>
@@ -74,7 +80,7 @@
       </div>
     </section>
 
-    <section aria-label="Recommended frames">
+    <section aria-label="Recommended frames" id="frames">
       <div class="controls">
         <label>Vision plan<select id="plan"></select></label>
         <label>Sort by<select id="sort"><option value="match">Best match</option><option value="oop">Lowest out of pocket</option><option value="price">Price</option></select></label>
@@ -88,7 +94,7 @@
   </div>
 </main>
 
-<section class="band settings" aria-label="Practice settings">
+<section class="band settings" aria-label="Practice settings" id="practice">
   <div class="wrap">
     <h2>Practice settings</h2>
     <p>What the practice fills in once. In the full product these would sync from the practice-management system. Changes stay on this device only.</p>

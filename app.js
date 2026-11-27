@@ -577,9 +577,10 @@ function render(){
   $('count').textContent=rows.length+' of '+catalog.length+' frames match these filters'+(rows.length>shown.length?' · showing top '+shown.length:'');
   $('more').hidden=rows.length<=8;$('more').textContent=showAll?'Show top 8':'Show all '+rows.length;
   if(!selected||!rows.some(r=>r.f.id===selected))selected=rows[0]?.f.id||null;
+  const bestId=sort==='match'&&rows[0]?rows[0].f.id:null;
   $('rack').innerHTML=shown.length?shown.map(r=>`<article class="card${r.f.id===selected?' sel':''}" data-id="${esc(r.f.id)}">
     <canvas width="300" height="128" data-thumb="${esc(r.f.id)}" aria-hidden="true"></canvas>
-    <div><div class="cname">${esc(r.f.name)} <span class="cmeta">· ${esc(r.f.brand)}</span></div>
+    <div><div class="cname">${esc(r.f.name)} <span class="cmeta">· ${esc(r.f.brand)}</span>${r.f.id===bestId?'<span class="best">Best match</span>':''}</div>
       <div class="cmeta"><span class="swatch" style="width:12px;height:12px;background:${esc(r.f.hex)}"></span> ${esc(r.f.color)} · ${esc(FRAME_LABEL[r.f.shape])} · ${esc(r.f.size)} · ${r.f.stock>0?esc(r.f.stock)+' in stock':'order only'}</div>
       <div class="why">${r.why.map(esc).join(' · ')||'neutral fit'}</div>
       <div class="meter"><i style="width:${r.pct}%"></i></div></div>
