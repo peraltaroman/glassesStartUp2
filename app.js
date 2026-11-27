@@ -180,6 +180,29 @@ function synthPhoto(f){
 }
 /* Photo (or generated) front with thickness and face-form wrap, arms from the side photo,
    and an invisible head shape that hides whatever goes behind the head. Units: mm. Origin: between the pupils. */
+// Find where the arms attach, from the front image itself: the outermost opaque pixels on each side
+// (the end pieces). Works the same for photographed and generated fronts, whatever the frame shape.
+function alphaOf(img,w,h){const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(img,0,0,w,h);return x.getImageData(0,0,w,h).data;}
+function hingesOf(ph){
+  if(ph.hinges)return ph.hinges;
+  const k=Math.min(1,600/ph.w),w=Math.max(8,Math.round(ph.w*k)),h=Math.max(4,Math.round(ph.h*k)),a=alphaOf(ph.img,w,h),A=(x,y)=>a[(y*w+x)*4+3]>128;
+  const side=dir=>{let edge=-1;
+    for(let i=0;i<w&&edge<0;i++){const x=dir<0?i:w-1-i;for(let y=0;y<h;y++)if(A(x,y)){edge=x;break;}}
+    if(edge<0)return{x:dir<0?0:1,y:.4};
+    const band=Math.max(2,Math.round(w*.025)),rows=[];
+    for(let i=0;i<band;i++){const x=edge-dir*i;if(x<0||x>=w)break;for(let y=0;y<h;y++)if(A(x,y))rows.push(y);}
+    rows.sort((p,q)=>p-q);const top=rows[0],mid=rows[rows.length>>1];
+    // hinges sit in the upper part of the end piece
+    return{x:(edge+.5)/w,y:(Math.min(mid,top+(mid-top)*.6)+.5)/h};};
+  return ph.hinges={L:side(-1),R:side(1)};
+}
+// Where the arm's front end is in the side image (vertical centre of its first few millimetres).
+function armStartOf(sd){
+  if(sd.start!=null)return sd.start;
+  const w=sd.img.naturalWidth||sd.img.width,h=sd.img.naturalHeight||sd.img.height,a=alphaOf(sd.img,w,h),rows=[];
+  for(let x=0;x<Math.max(3,Math.round(w*.03));x++)for(let y=0;y<h;y++)if(a[(y*w+x)*4+3]>128)rows.push(y);
+  rows.sort((p,q)=>p-q);return sd.start=rows.length?(rows[rows.length>>1]+.5)/h:.5;
+}
 function buildModel(f){
   const ph=photos[f.id]||synthPhoto(f),sd=sides[f.id],z=parseSize(f.size),Wmm=frameMm(f),Hmm=Wmm*ph.h/ph.w,WRAP=240;
   const root=new THREE.Group(),k=new THREE.Group();root.add(k);k.position.z=12; // refined per face in fitModel
@@ -190,20 +213,20 @@ function buildModel(f){
     const m=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({map:tex,transparent:true,side:THREE.DoubleSide,alphaTest:i?.5:.02,depthWrite:!!i,color:i?0x5a5a5a:0xffffff}));
     m.position.set(0,frontY,-i*.25);m.renderOrder=i?1:3;k.add(m);
   }
-  // hinges sit on the wrapped front's outer edge, so the arms start exactly where the front ends
-  const hingeX=Wmm/2-3,hingeZ=-(hingeX*hingeX)/(2*WRAP)-1.5,arms=[];
+  // hinges sit exactly on each end piece of the wrapped front, found from the image, so every arm starts where the front ends
+  const hg=hingesOf(ph),arms=[],wrapZ=x=>-(x*x)/(2*WRAP);
   for(const s of[-1,1]){
-    const piv=new THREE.Group();piv.rotation.order='YXZ';k.add(piv);
+    const H=s<0?hg.L:hg.R,hx=(H.x-.5)*Wmm-s*1.2,hy=frontY+Hmm/2-H.y*Hmm,hz=wrapZ(hx)-1.6;
+    const piv=new THREE.Group();piv.rotation.order='YXZ';piv.position.set(hx,hy,hz);k.add(piv);
     const arm={s,piv,photo:!!sd};
-    if(sd){const sc=z.temple*.96/sd.lenPx,L=sd.lenPx*sc,Ha=sd.hPx*sc,topY=frameTop-sd.offPx*sc;
-      piv.position.set(s*hingeX,topY-Math.min(Ha,4)/2,hingeZ);
+    if(sd){const sc=z.temple*.96/sd.lenPx,L=sd.lenPx*sc,Ha=sd.hPx*sc,st=armStartOf(sd);
       const g=new THREE.PlaneGeometry(L,Ha);g.rotateY(Math.PI/2);
       const m=new THREE.Mesh(g,new THREE.MeshBasicMaterial({map:texOf(sd.img),transparent:true,alphaTest:.5,side:THREE.DoubleSide}));
-      m.position.set(0,Math.min(Ha,4)/2-Ha/2,-L/2);m.renderOrder=1;piv.add(m);
+      m.position.set(0,st*Ha-Ha/2,-L/2+1.5);m.renderOrder=1;piv.add(m); // starts 1.5 mm inside the end piece: no gap
     }else{const mat=new THREE.MeshBasicMaterial({color:new THREE.Color(ph.hex)});
-      piv.position.set(s*hingeX,frameTop-Hmm*.13,hingeZ);
+      const knuckle=new THREE.Mesh(new THREE.BoxGeometry(3,4.6,4),mat);knuckle.position.set(0,0,0);
       const straight=new THREE.Mesh(new THREE.BoxGeometry(2.4,4.2,1),mat),tail=new THREE.Group(),tm=new THREE.Mesh(new THREE.BoxGeometry(2.2,3.6,1),mat);
-      tail.add(tm);piv.add(straight,tail);straight.renderOrder=tm.renderOrder=1;Object.assign(arm,{straight,tail,tm,temple:z.temple});}
+      tail.add(tm);piv.add(knuckle,straight,tail);knuckle.renderOrder=straight.renderOrder=tm.renderOrder=1;Object.assign(arm,{straight,tail,tm,temple:z.temple});}
     arms.push(arm);
   }
   // occluders: the person's own face surface (updated every frame) and a head shape behind it
@@ -212,7 +235,7 @@ function buildModel(f){
   const occ=new THREE.MeshBasicMaterial({colorWrite:false,side:THREE.DoubleSide});
   const faceOcc=new THREE.Mesh(faceGeo,occ);faceOcc.renderOrder=0;faceOcc.visible=false;faceOcc.frustumCulled=false;root.add(faceOcc);
   const head=new THREE.Mesh(new THREE.SphereGeometry(1,40,24),occ);head.renderOrder=0;root.add(head);
-  root.userData={k,arms,head,faceOcc,hingeX,hingeZ};
+  root.userData={k,arms,head,faceOcc};
   fitModel(root,null);
   return root;
 }
@@ -228,7 +251,7 @@ function aimArm(arm,target,k){
   const flat=Math.hypot(d.x,d.z);
   arm.piv.rotation.set(Math.atan2(d.y,flat),Math.atan2(-d.x,-d.z),0);
   if(arm.straight){const L=Math.max(arm.temple-40,Math.min(arm.temple-18,d.length()+4)); // the bend behind the ear is ~25-40 mm
-    arm.straight.scale.z=L;arm.straight.position.z=-L/2;
+    arm.straight.scale.z=L+1.5;arm.straight.position.z=-L/2+.75;
     const T=arm.temple-L;arm.tail.position.z=-L;arm.tail.rotation.x=-.75;arm.tm.scale.z=T;arm.tm.position.z=-T/2;}
 }
 // Fit the frame to this face: front rests on the nose bridge, arms aim at the ears, occluders follow the head.
