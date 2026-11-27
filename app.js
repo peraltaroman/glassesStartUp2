@@ -58,7 +58,17 @@ function idbPut(k,v){try{if(db)db.transaction('photos','readwrite').objectStore(
 function idbDel(k){try{if(db)db.transaction('photos','readwrite').objectStore('photos').delete(k)}catch(e){}}
 async function useSide(id,rec){const img=new Image();img.src=rec.url;await img.decode();sides[id]={img,lenPx:rec.lenPx,hPx:rec.hPx,offPx:rec.offPx};models.clear();}
 const models=new Map();
-async function usePhoto(id,rec){models.clear();const img=new Image();img.src=rec.url;await img.decode();photos[id]={img,w:img.naturalWidth,h:img.naturalHeight,lensY:rec.lensY,hex:rec.hex};}
+// Lens centre height from the lens area itself (the faint lens layer added during cutout), so thin or
+// light rims can't throw it off. Returns null for rimless fronts with no enclosed lens.
+function lensCenterOf(img,w,h){
+  const k=Math.min(1,400/w),W=Math.max(4,Math.round(w*k)),H=Math.max(2,Math.round(h*k)),c=document.createElement('canvas');c.width=W;c.height=H;
+  const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(img,0,0,W,H);const d=x.getImageData(0,0,W,H).data;
+  let n=0,sy=0;for(let p=0;p<W*H;p++){const a=d[p*4+3];if(a>6&&a<80){n++;sy+=Math.floor(p/W)+.5;}}
+  return n>W*H*.05?sy/n/H:null;
+}
+async function usePhoto(id,rec){models.clear();const img=new Image();img.src=rec.url;await img.decode();
+  const w=img.naturalWidth,h=img.naturalHeight,ly=lensCenterOf(img,w,h);
+  photos[id]={img,w,h,lensY:ly??rec.lensY,hex:rec.hex};}
 
 /* ---------- style rules ---------- */
 const SHAPES=['oval','round','square','oblong','heart','diamond'];
@@ -196,6 +206,20 @@ function hingesOf(ph){
     return{x:(edge+.5)/w,y:(Math.min(mid,top+(mid-top)*.6)+.5)/h};};
   return ph.hinges={L:side(-1),R:side(1)};
 }
+// Where the photo arm starts bending down (fraction of its length): the top edge drops well below where it started.
+function armBendOf(sd){
+  if(sd.bend!=null)return sd.bend;
+  const w=sd.img.naturalWidth||sd.img.width,h=sd.img.naturalHeight||sd.img.height,a=alphaOf(sd.img,w,h);
+  const top=x=>{for(let y=0;y<h;y++)if(a[(y*w+x)*4+3]>128)return y;return -1;};
+  // fit a straight line to the top edge over 10–45% of the length (the straight part, which may slope in the photo)
+  const xs=[],ys=[];for(let x=Math.round(w*.1);x<w*.45;x+=2){const t=top(x);if(t>=0){xs.push(x);ys.push(t);}}
+  let b=.75;
+  if(xs.length>5){const n=xs.length,mx=xs.reduce((p,q)=>p+q)/n,my=ys.reduce((p,q)=>p+q)/n;
+    let sxy=0,sxx=0;for(let i=0;i<n;i++){sxy+=(xs[i]-mx)*(ys[i]-my);sxx+=(xs[i]-mx)**2;}
+    const m=sxy/sxx,c=my-m*mx;let th=0;const x0=Math.round(w*.2);for(let y=top(x0);y>=0&&y<h&&a[(y*w+x0)*4+3]>128;y++)th++;
+    for(let x=Math.round(w*.45);x<w;x++){const t=top(x);if(t>=0&&t-(m*x+c)>Math.max(3,th*.6)){b=x/w;break;}}}
+  return sd.bend=Math.max(.5,Math.min(.92,b));
+}
 // Where the arm's front end is in the side image (vertical centre of its first few millimetres).
 function armStartOf(sd){
   if(sd.start!=null)return sd.start;
@@ -223,6 +247,7 @@ function buildModel(f){
       const g=new THREE.PlaneGeometry(L,Ha);g.rotateY(Math.PI/2);
       const m=new THREE.Mesh(g,new THREE.MeshBasicMaterial({map:texOf(sd.img),transparent:true,alphaTest:.5,side:THREE.DoubleSide}));
       m.position.set(0,st*Ha-Ha/2,-L/2+1.5);m.renderOrder=1;piv.add(m); // starts 1.5 mm inside the end piece: no gap
+      Object.assign(arm,{mesh:m,L,bendFrac:armBendOf(sd)});
     }else{const mat=new THREE.MeshBasicMaterial({color:new THREE.Color(ph.hex)});
       const knuckle=new THREE.Mesh(new THREE.BoxGeometry(3,4.6,4),mat);knuckle.position.set(0,0,0);
       const straight=new THREE.Mesh(new THREE.BoxGeometry(2.4,4.2,1),mat),tail=new THREE.Group(),tm=new THREE.Mesh(new THREE.BoxGeometry(2.2,3.6,1),mat);
@@ -235,7 +260,9 @@ function buildModel(f){
   const occ=new THREE.MeshBasicMaterial({colorWrite:false,side:THREE.DoubleSide});
   const faceOcc=new THREE.Mesh(faceGeo,occ);faceOcc.renderOrder=0;faceOcc.visible=false;faceOcc.frustumCulled=false;root.add(faceOcc);
   const head=new THREE.Mesh(new THREE.SphereGeometry(1,40,24),occ);head.renderOrder=0;root.add(head);
-  root.userData={k,arms,head,faceOcc};
+  // ears: invisible rounded shapes on the outside of the head, so the hook of each arm disappears behind the ear
+  const earGeo=new THREE.SphereGeometry(1,28,18),ears=[-1,1].map(()=>{const m=new THREE.Mesh(earGeo,occ);m.renderOrder=0;m.visible=false;root.add(m);return m;});
+  root.userData={k,arms,head,faceOcc,ears};
   fitModel(root,null);
   return root;
 }
@@ -247,17 +274,21 @@ function aimArm(arm,target,k){
   const h=_t.set(arm.piv.position.x,arm.piv.position.y,arm.piv.position.z+k.position.z),t=target.clone();
   // keep the ear point plausible relative to the hinge: behind it, not inside the frame width, near hinge height
   t.z=Math.min(t.z,h.z-60);t.x=arm.s>0?Math.max(t.x,h.x+2):Math.min(t.x,h.x-2);t.y=Math.max(h.y-6,Math.min(h.y+12,t.y));
+  arm.contact=t.clone();
   const d=t.sub(h);
   const flat=Math.hypot(d.x,d.z);
   arm.piv.rotation.set(Math.atan2(d.y,flat),Math.atan2(-d.x,-d.z),0);
-  if(arm.straight){const L=Math.max(arm.temple-40,Math.min(arm.temple-18,d.length()+4)); // the bend behind the ear is ~25-40 mm
+  const dist=d.length();
+  if(arm.mesh){ // photo arm: stretch slightly (as an optician adjusts it) so its bend lands on the ear
+    const k2=Math.max(.8,Math.min(1.25,dist/(arm.bendFrac*arm.L)));arm.mesh.scale.z=k2;arm.mesh.position.z=(-arm.L/2+1.5)*k2;}
+  if(arm.straight){const L=Math.max(45,Math.min(arm.temple-15,dist)); // bend sits on the ear; the rest hooks down behind it
     arm.straight.scale.z=L+1.5;arm.straight.position.z=-L/2+.75;
-    const T=arm.temple-L;arm.tail.position.z=-L;arm.tail.rotation.x=-.75;arm.tm.scale.z=T;arm.tm.position.z=-T/2;}
+    const T=Math.min(55,Math.max(15,arm.temple-L));arm.tail.position.z=-L;arm.tail.rotation.x=-.75;arm.tm.scale.z=T;arm.tm.position.z=-T/2;}
 }
 // Fit the frame to this face: front rests on the nose bridge, arms aim at the ears, occluders follow the head.
 function fitModel(root,loc){
   const u=root.userData;
-  if(!loc){u.k.position.z=12;u.faceOcc.visible=false;u.head.scale.set(66,100,90);u.head.position.set(0,-12,-88);
+  if(!loc){u.k.position.z=12;u.faceOcc.visible=false;u.ears.forEach(e=>e.visible=false);u.head.scale.set(66,100,90);u.head.position.set(0,-12,-88);
     for(const a of u.arms)aimArm(a,a.s<0?DEFAULT_EARS.L:DEFAULT_EARS.R,u.k);return;}
   const P=i=>new THREE.Vector3(loc[i*3],loc[i*3+1],loc[i*3+2]);
   const bridge=P(168);u.k.position.z=Math.max(6,Math.min(22,bridge.z+5));
@@ -267,6 +298,10 @@ function fitModel(root,loc){
   const tL=P(127),tR=P(356);
   const ears={L:new THREE.Vector3(tL.x-2,tL.y+14,tL.z-15),R:new THREE.Vector3(tR.x+2,tR.y+14,tR.z-15)};
   for(const a of u.arms)aimArm(a,a.s<0?ears.L:ears.R,u.k);
+  // ear volume: just below where the arm rests, reaching ~18 mm out from the arm, ~62 mm tall, ~54 mm front-to-back,
+  // tilted back slightly like a real ear. Its top sits 4 mm under the contact point so the arm stays visible on top.
+  for(const a of u.arms){const c=a.contact,e=u.ears[a.s<0?0:1];if(!c)continue;
+    e.scale.set(10,31,27);e.position.set(c.x+a.s*8,c.y-4-31,c.z-15);e.rotation.set(.22,0,0);e.visible=true;}
   const half=(eR.x-eL.x)/2;
   u.head.scale.set(Math.max(50,half-3),105,85);u.head.position.set((eR.x+eL.x)/2,(eL.y+eR.y)/2-8,(eL.z+eR.z)/2-35);
   if(FACE_TRIS){const a=u.faceOcc.geometry.attributes.position;
