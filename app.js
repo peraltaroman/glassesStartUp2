@@ -201,7 +201,7 @@ function buildModel(f){
       const m=new THREE.Mesh(g,new THREE.MeshBasicMaterial({map:texOf(sd.img),transparent:true,alphaTest:.5,side:THREE.DoubleSide}));
       m.position.set(0,Math.min(Ha,4)/2-Ha/2,-L/2);m.renderOrder=1;piv.add(m);
     }else{const mat=new THREE.MeshBasicMaterial({color:new THREE.Color(ph.hex)});
-      piv.position.set(s*hingeX,frameTop-Hmm*.18,hingeZ);
+      piv.position.set(s*hingeX,frameTop-Hmm*.13,hingeZ);
       const straight=new THREE.Mesh(new THREE.BoxGeometry(2.4,4.2,1),mat),tail=new THREE.Group(),tm=new THREE.Mesh(new THREE.BoxGeometry(2.2,3.6,1),mat);
       tail.add(tm);piv.add(straight,tail);straight.renderOrder=tm.renderOrder=1;Object.assign(arm,{straight,tail,tm,temple:z.temple});}
     arms.push(arm);
@@ -223,7 +223,7 @@ function aimArm(arm,target,k){
   // hinge position in root space -> direction to the point where the arm should rest on the ear
   const h=_t.set(arm.piv.position.x,arm.piv.position.y,arm.piv.position.z+k.position.z),t=target.clone();
   // keep the ear point plausible relative to the hinge: behind it, not inside the frame width, near hinge height
-  t.z=Math.min(t.z,h.z-60);t.x=arm.s>0?Math.max(t.x,h.x+2):Math.min(t.x,h.x-2);t.y=Math.max(h.y-10,Math.min(h.y+2,t.y));
+  t.z=Math.min(t.z,h.z-60);t.x=arm.s>0?Math.max(t.x,h.x+2):Math.min(t.x,h.x-2);t.y=Math.max(h.y-6,Math.min(h.y+12,t.y));
   const d=t.sub(h);
   const flat=Math.hypot(d.x,d.z);
   arm.piv.rotation.set(Math.atan2(d.y,flat),Math.atan2(-d.x,-d.z),0);
@@ -239,8 +239,10 @@ function fitModel(root,loc){
   const P=i=>new THREE.Vector3(loc[i*3],loc[i*3+1],loc[i*3+2]);
   const bridge=P(168);u.k.position.z=Math.max(6,Math.min(22,bridge.z+5));
     const eL=P(234),eR=P(454);
-  // the arm rests on the top of the ear, roughly 16 mm above and 22 mm behind the mesh's tragus-level edge point
-  const ears={L:new THREE.Vector3(eL.x-3,eL.y+16,eL.z-22),R:new THREE.Vector3(eR.x+3,eR.y+16,eR.z-22)};
+  // Where the arm rests: the top of the ear root. The mesh stops in front of the ear; its contour point 127/356
+  // sits at the top of the tragus, and the ear root is ~14 mm above that and ~15 mm further back.
+  const tL=P(127),tR=P(356);
+  const ears={L:new THREE.Vector3(tL.x-2,tL.y+14,tL.z-15),R:new THREE.Vector3(tR.x+2,tR.y+14,tR.z-15)};
   for(const a of u.arms)aimArm(a,a.s<0?ears.L:ears.R,u.k);
   const half=(eR.x-eL.x)/2;
   u.head.scale.set(Math.max(50,half-3),105,85);u.head.position.set((eR.x+eL.x)/2,(eL.y+eR.y)/2-8,(eL.z+eR.z)/2-35);
