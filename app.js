@@ -156,7 +156,7 @@ let face=null;   // finished face analysis {faceMm, ...} used for size fit
 let trk=null;    // latest raw tracking result
 let pose=null;   // smoothed pose in source pixels {mid,iris,pupilPx,pxmm,q}
 let mode='none'; // none | live | image
-let srcImg=null,stream=null,mesh=null,meshReady=null;
+let srcImg=null,stream=null;
 const cv=$('tryon'),video=$('cam'),stage=$('stage');
 const status=(t,err)=>{$('status').textContent=t;$('status').className='status'+(err?' err':'');};
 
@@ -269,14 +269,21 @@ function clear3D(){const G=gl();if(G){G.scene.clear();G.r.clear();}}
 const V3=THREE.Vector3;
 const IRIS_MM=11.7;   // adult iris diameter is close to constant
 const PITCH0=-14*Math.PI/180; // calibration: the forehead–chin line leans ~14° toward the camera on a level head
-function derive(lm,w,h){
+const MAT_TRANSPOSE=false;
+// MediaPipe's canonical face model is tilted ~18° relative to the line glasses sit on (eyes to ear tops)
+const MAT_PITCH0=-18*Math.PI/180;
+function derive(lm,w,h,mat){
   const p=i=>({x:lm[i].x*w,y:lm[i].y*h,z:lm[i].z*w}),d3=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z);
   const iA=p(468),iB=p(473),dia=(a,b,c,e)=>(d3(p(a),p(b))+d3(p(c),p(e)))/2;
   const iris=(dia(469,471,470,472)+dia(474,476,475,477))/2,pupilPx=d3(iA,iB);
   const v=(a,b)=>new V3(b.x-a.x,-(b.y-a.y),-(b.z-a.z)); // to y-up, z-toward-camera
   const r=v(p(33),p(263)).normalize(),u0=v(p(152),p(10)).normalize(),fw=new V3().crossVectors(r,u0).normalize(),u=new V3().crossVectors(fw,r).normalize();
-  const q=new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(r,u,fw));
-  if(PITCH0)q.multiply(new THREE.Quaternion().setFromAxisAngle(new V3(1,0,0),PITCH0));
+  let q;
+  if(mat){const M=new THREE.Matrix4().fromArray(mat);if(MAT_TRANSPOSE)M.transpose();q=new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().extractRotation(M));
+    q.multiply(new THREE.Quaternion().setFromAxisAngle(new V3(1,0,0),MAT_PITCH0));}
+  else{q=new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(r,u,fw));
+    if(PITCH0)q.multiply(new THREE.Quaternion().setFromAxisAngle(new V3(1,0,0),PITCH0));}
+  const qLm=new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(r,u,fw)).multiply(new THREE.Quaternion().setFromAxisAngle(new V3(1,0,0),PITCH0));
   const cheek=d3(p(234),p(454)),jaw=d3(p(172),p(397)),fore=d3(p(54),p(284)),len=d3(p(10),p(152));
   const c=p(152),a1=p(148),a2=p(377),va={x:a1.x-c.x,y:a1.y-c.y},vb={x:a2.x-c.x,y:a2.y-c.y};
   const chin=Math.acos((va.x*vb.x+va.y*vb.y)/(Math.hypot(va.x,va.y)*Math.hypot(vb.x,vb.y)))*180/Math.PI;
@@ -286,7 +293,7 @@ function derive(lm,w,h){
   const inv=q.clone().invert(),mx=(iA.x+iB.x)/2,my=(iA.y+iB.y)/2,mz=(iA.z+iB.z)/2,locPx=new Float32Array(lm.length*3),t=new V3();
   for(let i=0;i<lm.length;i++){t.set(lm[i].x*w-mx,-(lm[i].y*h-my),-(lm[i].z*w-mz)).applyQuaternion(inv);locPx[i*3]=t.x;locPx[i*3+1]=t.y;locPx[i*3+2]=t.z;}
   const e=new THREE.Euler().setFromQuaternion(q,'YXZ');
-  return{mid:{x:mx,y:my},iris,pupilPx,q,cheek,jaw,fore,len,chin,box:{x:x0,y:y0,w:x1-x0,h:y1-y0},pitchDeg,locPx,yaw:e.y,pitch:e.x,
+  return{qLm,hasMat:!!mat,mid:{x:mx,y:my},iris,pupilPx,q,cheek,jaw,fore,len,chin,box:{x:x0,y:y0,w:x1-x0,h:y1-y0},pitchDeg,locPx,yaw:e.y,pitch:e.x,
     pdMm:pupilPx/(iris/IRIS_MM)};
 }
 const pdManual=()=>{const v=+$('pd').value;return v>=45&&v<=80?v:0};
@@ -322,12 +329,12 @@ let samples=[],pdHist=[],analysed=false;
 const med=a=>{const s=[...a].sort((x,y)=>x-y);return s[s.length>>1]};
 // Each shape is a typical point in (length/width, forehead, jaw, chin widths, jaw-corner angle); the face gets a
 // closeness score to every shape, so in-between faces read as a mix instead of being forced into one box.
-const PROTO={oval:[1.22,.93,.80,.53,142],round:[1.06,.93,.84,.58,146],square:[1.10,.96,.88,.60,133],
-  oblong:[1.38,.94,.84,.55,140],heart:[1.18,.98,.76,.48,143],diamond:[1.22,.86,.77,.50,142]};
-const SIG=[.07,.03,.03,.03,4];
+const PROTO={oval:[1.18,.94,.80,.54,140],round:[1.02,.95,.82,.56,145],square:[1.06,.96,.87,.60,134],
+  oblong:[1.34,.93,.85,.57,138],heart:[1.10,.99,.74,.48,144],diamond:[1.16,.88,.76,.50,141]};
+const SIG=[.08,.03,.035,.035,4];
 function classifyMix(f){
   const v=[f.R,f.F,f.J,f.Ch,f.jawAng],e={};let tot=0;
-  for(const k of SHAPES){const d2=PROTO[k].reduce((a,p,i)=>a+((v[i]-p)/SIG[i])**2,0);e[k]=Math.exp(-d2/3);tot+=e[k];}
+  for(const k of SHAPES){const d2=PROTO[k].reduce((a,p,i)=>a+((v[i]-p)/SIG[i])**2,0);e[k]=Math.exp(-d2/4);tot+=e[k];}
   const mix={};for(const k of SHAPES)mix[k]=e[k]/tot;
   const shape=SHAPES.reduce((a,b)=>mix[b]>mix[a]?b:a);
   return{mix,shape};
@@ -371,32 +378,55 @@ function rescan(){samples=[];analysed=false;face=null;profile.mix=null;profile.t
 $('rescan').addEventListener('click',()=>{rescan();if(mode==='image'&&srcImg)runImage();});
 
 /* ---------- tracking ---------- */
-function initMesh(){
-  if(meshReady)return meshReady;
-  meshReady=(async()=>{
-    if(!window.FaceMesh)throw new Error('face tracking library did not load');
-    mesh=new window.FaceMesh({locateFile:f=>'vendor/face_mesh/'+f});
-    mesh.setOptions({maxNumFaces:1,refineLandmarks:true,minDetectionConfidence:.5,minTrackingConfidence:.5});
-    mesh.onResults(onResults);
-    await mesh.initialize();
+// Primary tracker: Google MediaPipe Face Landmarker (478 points + a full 3D head-pose matrix). The runtime is
+// vendored in /vendor/tasks-vision; the model loads from Google's official model storage. If that fails
+// (offline, blocked, old browser) the app falls back to the vendored MediaPipe Face Mesh.
+const MODEL_URL='https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+let engine=null,engineReady=null;
+function initTracker(){
+  if(engineReady)return engineReady;
+  engineReady=(async()=>{
+    try{engine=await makeTasksEngine();}
+    catch(e){console.warn('Face Landmarker unavailable, falling back to Face Mesh:',e);engine=await makeMeshEngine();}
+    return engine;
   })();
-  return meshReady;
+  engineReady.catch(()=>{engineReady=null;});
+  return engineReady;
+}
+async function makeTasksEngine(){
+  const {FaceLandmarker,FilesetResolver}=await import('./vendor/tasks-vision/vision_bundle.mjs');
+  const fs=await FilesetResolver.forVisionTasks(new URL('vendor/tasks-vision/wasm',location.href).href);
+  const opts=d=>({baseOptions:{modelAssetPath:MODEL_URL,delegate:d},runningMode:'VIDEO',numFaces:1,
+    outputFacialTransformationMatrixes:true,outputFaceBlendshapes:false,minFaceDetectionConfidence:.5,minFacePresenceConfidence:.5,minTrackingConfidence:.5});
+  let fl;try{fl=await FaceLandmarker.createFromOptions(fs,opts('GPU'));}catch(e){fl=await FaceLandmarker.createFromOptions(fs,opts('CPU'));}
+  let run='VIDEO',lastTs=0;
+  const pick=r=>r&&r.faceLandmarks&&r.faceLandmarks[0]?{lm:r.faceLandmarks[0],mat:r.facialTransformationMatrixes&&r.facialTransformationMatrixes[0]?r.facialTransformationMatrixes[0].data:null}:null;
+  const to=async m=>{if(run!==m){await fl.setOptions({runningMode:m});run=m;}};
+  return{name:'Google MediaPipe Face Landmarker',
+    async video(v){await to('VIDEO');let ts=performance.now();if(ts<=lastTs)ts=lastTs+1;lastTs=ts;return pick(fl.detectForVideo(v,ts));},
+    async image(c){await to('IMAGE');return pick(fl.detect(c));},reset(){}};
+}
+async function makeMeshEngine(){
+  if(!window.FaceMesh)throw new Error('face tracking library did not load');
+  const m=new window.FaceMesh({locateFile:f=>'vendor/face_mesh/'+f});
+  m.setOptions({maxNumFaces:1,refineLandmarks:true,minDetectionConfidence:.5,minTrackingConfidence:.5});
+  let next=null;m.onResults(r=>{const f=next;next=null;f&&f(r.multiFaceLandmarks&&r.multiFaceLandmarks[0]?{lm:r.multiFaceLandmarks[0],mat:null}:null);});
+  await m.initialize();
+  const run=src=>new Promise(res=>{next=res;m.send({image:src}).catch(()=>{next=null;res(null)});});
+  return{name:'MediaPipe Face Mesh (fallback)',video:run,async image(c){m.reset();return run(c);},reset(){m.reset();}};
 }
 let lost=0;
-let imgXf=null,imgDone=null; // still photos are searched in tiles; landmarks are mapped back to the full image
-function onResults(r){
-  let lm=r.multiFaceLandmarks&&r.multiFaceLandmarks[0];
-  if(mode==='image'&&imgDone){const done=imgDone;imgDone=null;if(!lm){done(false);return;}
-    const t=imgXf;lm=lm.map(l=>({x:(t.x0+l.x*t.cw)/t.W,y:(t.y0+l.y*t.ch)/t.H,z:l.z*t.cw/t.W}));setTimeout(()=>done(true));}
-  const w=mode==='live'?video.videoWidth:srcImg.naturalWidth,h=mode==='live'?video.videoHeight:srcImg.naturalHeight;
-  if(!lm){if(++lost>10){pose=null;trk=null;}if(mode==='image')status('No face found. Try a front-facing photo with the whole face visible and even light.',true);else if(lost>10)status('Looking for a face… face the camera in even light.');return;}
-  lost=0;const n=derive(lm,w,h);trk={...n,lm,w,h};smoothPose(n);addSample(n,lm,w,h);
+function handle(r,w,h){
+  if(!r){if(++lost>10){pose=null;trk=null;}if(mode==='live'&&lost>10)status('Looking for a face… face the camera in even light.');return false;}
+  lost=0;const n=derive(r.lm,w,h,r.mat);trk={...n,lm:r.lm,w,h};smoothPose(n);addSample(n,r.lm,w,h);
   if(pdHist.length%6===0||mode==='image'){$('pdPill').hidden=false;$('pdPill').textContent='Camera PD ≈ '+med(pdHist).toFixed(1)+' mm';$('usePd').hidden=!!pdManual();}
+  return true;
 }
 let busy=false,lastT=-1;
 async function tick(){
   if(mode!=='live')return;
-  if(video.readyState>=2&&!busy&&video.currentTime!==lastT){busy=true;lastT=video.currentTime;try{await mesh.send({image:video});}catch(e){console.error(e)}busy=false;}
+  if(video.readyState>=2&&!busy&&video.currentTime!==lastT){busy=true;lastT=video.currentTime;
+    try{handle(await engine.video(video),video.videoWidth,video.videoHeight);}catch(e){console.error(e)}busy=false;}
   drawStage();requestAnimationFrame(tick);
 }
 function stopCamera(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}video.srcObject=null;}
@@ -411,9 +441,10 @@ async function startCamera(){
   catch(e){status(e.name==='NotAllowedError'?'Camera permission was blocked. Allow camera access for this site in the browser settings, or use a photo.':'Could not open the camera: '+e.message,true);return;}
   video.srcObject=stream;try{await video.play();}catch(e){}
   status('Loading face tracking…');
-  try{await initMesh();}catch(e){status('Face tracking could not start: '+e.message,true);return;}
-  mesh.reset&&mesh.reset();setMode('live');status('Looking for a face…');tick();
+  try{await initTracker();}catch(e){status('Face tracking could not start: '+e.message,true);return;}
+  engine.reset();setMode('live');status('Looking for a face… ('+engine.name+')');tick();
 }
+// Still photos: search the whole image, then overlapping tiles (small faces in group shots), and map back.
 async function runImage(){
   status('Scanning…');trk=null;pose=null;
   const W=srcImg.naturalWidth,H=srcImg.naturalHeight,t=Math.round(Math.min(W,H)*.6),tiles=[[0,0,W,H]];
@@ -421,9 +452,8 @@ async function runImage(){
   for(const [x0,y0,cw,ch] of tiles){
     const k=Math.min(1,1280/Math.max(cw,ch)),c=document.createElement('canvas');c.width=Math.round(cw*k);c.height=Math.round(ch*k);
     c.getContext('2d').drawImage(srcImg,x0,y0,cw,ch,0,0,c.width,c.height);
-    imgXf={x0,y0,cw,ch,W,H};mesh.reset&&mesh.reset();
-    const found=await new Promise(res=>{imgDone=res;mesh.send({image:c}).catch(()=>{imgDone=null;res(false)});});
-    if(found){drawStage();return;}
+    let r=null;try{r=await engine.image(c);}catch(e){console.error(e)}
+    if(r){const lm=r.lm.map(l=>({x:(x0+l.x*cw)/W,y:(y0+l.y*ch)/H,z:l.z*cw/W}));handle({lm,mat:r.mat},W,H);drawStage();return;}
   }
   status('No face found. Try a front-facing photo with the whole face visible and even light.',true);drawStage();
 }
@@ -434,7 +464,7 @@ $('openGate').addEventListener('click',()=>{$('gate').hidden=false;});
 $('photo').addEventListener('change',async e=>{
   const file=e.target.files[0];if(!file)return;const img=new Image();img.src=URL.createObjectURL(file);
   try{await img.decode();}catch(err){status('That file could not be opened as an image.',true);return;}
-  status('Loading face tracking…');try{await initMesh();}catch(err){status('Face tracking could not start: '+err.message,true);return;}
+  status('Loading face tracking…');try{await initTracker();}catch(err){status('Face tracking could not start: '+err.message,true);return;}
   srcImg=img;setMode('image');await runImage();e.target.value='';
 });
 $('pd').addEventListener('change',()=>{if(face&&trk)face.faceMm=trk.cheek/scaleOf(trk);pose&&trk&&(pose.pxmm=scaleOf(trk));$('usePd').hidden=!!pdManual();render();});
