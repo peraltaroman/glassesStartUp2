@@ -181,29 +181,78 @@ function synthPhoto(f){
 /* Photo (or generated) front with thickness and face-form wrap, arms from the side photo,
    and an invisible head shape that hides whatever goes behind the head. Units: mm. Origin: between the pupils. */
 function buildModel(f){
-  const ph=photos[f.id]||synthPhoto(f),sd=sides[f.id],z=parseSize(f.size),Wmm=frameMm(f),Hmm=Wmm*ph.h/ph.w;
-  const root=new THREE.Group(),k=new THREE.Group();root.add(k);k.position.z=12; // frame front ~12 mm in front of the eyes
+  const ph=photos[f.id]||synthPhoto(f),sd=sides[f.id],z=parseSize(f.size),Wmm=frameMm(f),Hmm=Wmm*ph.h/ph.w,WRAP=240;
+  const root=new THREE.Group(),k=new THREE.Group();root.add(k);k.position.z=12; // refined per face in fitModel
   const frontY=-(Hmm/2-ph.lensY*Hmm)-.04*Hmm,frameTop=frontY+Hmm/2,tex=texOf(ph.img);
   const geo=new THREE.PlaneGeometry(Wmm,Hmm,32,1),pos=geo.attributes.position;
-  for(let i=0;i<pos.count;i++){const x=pos.getX(i);pos.setZ(i,-x*x/(2*240));}
+  for(let i=0;i<pos.count;i++){const x=pos.getX(i);pos.setZ(i,-x*x/(2*WRAP));}
   for(let i=12;i>=0;i--){ // stacked layers give visible rim thickness at an angle
     const m=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({map:tex,transparent:true,side:THREE.DoubleSide,alphaTest:i?.5:.02,depthWrite:!!i,color:i?0x5a5a5a:0xffffff}));
     m.position.set(0,frontY,-i*.25);m.renderOrder=i?1:3;k.add(m);
   }
-  const hingeX=Wmm/2-3,spread=.09;
+  // hinges sit on the wrapped front's outer edge, so the arms start exactly where the front ends
+  const hingeX=Wmm/2-3,hingeZ=-(hingeX*hingeX)/(2*WRAP)-1.5,arms=[];
   for(const s of[-1,1]){
-    const piv=new THREE.Group();piv.position.set(s*hingeX,0,-2);piv.rotation.y=-s*spread;k.add(piv);
+    const piv=new THREE.Group();piv.rotation.order='YXZ';k.add(piv);
+    const arm={s,piv,photo:!!sd};
     if(sd){const sc=z.temple*.96/sd.lenPx,L=sd.lenPx*sc,Ha=sd.hPx*sc,topY=frameTop-sd.offPx*sc;
+      piv.position.set(s*hingeX,topY-Math.min(Ha,4)/2,hingeZ);
       const g=new THREE.PlaneGeometry(L,Ha);g.rotateY(Math.PI/2);
       const m=new THREE.Mesh(g,new THREE.MeshBasicMaterial({map:texOf(sd.img),transparent:true,alphaTest:.5,side:THREE.DoubleSide}));
-      m.position.set(0,topY-Ha/2,-L/2);m.renderOrder=1;piv.add(m);
-    }else{const L=z.temple*.9,m=new THREE.Mesh(new THREE.BoxGeometry(2.4,4.5,L),new THREE.MeshBasicMaterial({color:new THREE.Color(ph.hex)}));
-      m.position.set(0,frameTop-Hmm*.18,-L/2);m.renderOrder=1;piv.add(m);}
+      m.position.set(0,Math.min(Ha,4)/2-Ha/2,-L/2);m.renderOrder=1;piv.add(m);
+    }else{const mat=new THREE.MeshBasicMaterial({color:new THREE.Color(ph.hex)});
+      piv.position.set(s*hingeX,frameTop-Hmm*.18,hingeZ);
+      const straight=new THREE.Mesh(new THREE.BoxGeometry(2.4,4.2,1),mat),tail=new THREE.Group(),tm=new THREE.Mesh(new THREE.BoxGeometry(2.2,3.6,1),mat);
+      tail.add(tm);piv.add(straight,tail);straight.renderOrder=tm.renderOrder=1;Object.assign(arm,{straight,tail,tm,temple:z.temple});}
+    arms.push(arm);
   }
-  const head=new THREE.Mesh(new THREE.SphereGeometry(1,40,24),new THREE.MeshBasicMaterial({colorWrite:false}));
-  head.scale.set(66,100,90);head.position.set(0,-12,-88);head.renderOrder=0;root.add(head);
+  // occluders: the person's own face surface (updated every frame) and a head shape behind it
+  const faceGeo=new THREE.BufferGeometry();faceGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(478*3),3));
+  if(FACE_TRIS)faceGeo.setIndex(FACE_TRIS);
+  const occ=new THREE.MeshBasicMaterial({colorWrite:false,side:THREE.DoubleSide});
+  const faceOcc=new THREE.Mesh(faceGeo,occ);faceOcc.renderOrder=0;faceOcc.visible=false;faceOcc.frustumCulled=false;root.add(faceOcc);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(1,40,24),occ);head.renderOrder=0;root.add(head);
+  root.userData={k,arms,head,faceOcc,hingeX,hingeZ};
+  fitModel(root,null);
   return root;
 }
+// Default head when no face is tracked (3D view): ears ~72 mm out, ~70 mm back.
+const DEFAULT_EARS={L:new THREE.Vector3(-72,-4,-72),R:new THREE.Vector3(72,-4,-72)};
+const _t=new THREE.Vector3();
+function aimArm(arm,target,k){
+  // hinge position in root space -> direction to the point where the arm should rest on the ear
+  const h=_t.set(arm.piv.position.x,arm.piv.position.y,arm.piv.position.z+k.position.z),t=target.clone();
+  // keep the ear point plausible relative to the hinge: behind it, not inside the frame width, near hinge height
+  t.z=Math.min(t.z,h.z-60);t.x=arm.s>0?Math.max(t.x,h.x+2):Math.min(t.x,h.x-2);t.y=Math.max(h.y-10,Math.min(h.y+2,t.y));
+  const d=t.sub(h);
+  const flat=Math.hypot(d.x,d.z);
+  arm.piv.rotation.set(Math.atan2(d.y,flat),Math.atan2(-d.x,-d.z),0);
+  if(arm.straight){const L=Math.max(arm.temple-40,Math.min(arm.temple-18,d.length()+4)); // the bend behind the ear is ~25-40 mm
+    arm.straight.scale.z=L;arm.straight.position.z=-L/2;
+    const T=arm.temple-L;arm.tail.position.z=-L;arm.tail.rotation.x=-.75;arm.tm.scale.z=T;arm.tm.position.z=-T/2;}
+}
+// Fit the frame to this face: front rests on the nose bridge, arms aim at the ears, occluders follow the head.
+function fitModel(root,loc){
+  const u=root.userData;
+  if(!loc){u.k.position.z=12;u.faceOcc.visible=false;u.head.scale.set(66,100,90);u.head.position.set(0,-12,-88);
+    for(const a of u.arms)aimArm(a,a.s<0?DEFAULT_EARS.L:DEFAULT_EARS.R,u.k);return;}
+  const P=i=>new THREE.Vector3(loc[i*3],loc[i*3+1],loc[i*3+2]);
+  const bridge=P(168);u.k.position.z=Math.max(6,Math.min(22,bridge.z+5));
+    const eL=P(234),eR=P(454);
+  // the arm rests on the top of the ear, roughly 16 mm above and 22 mm behind the mesh's tragus-level edge point
+  const ears={L:new THREE.Vector3(eL.x-3,eL.y+16,eL.z-22),R:new THREE.Vector3(eR.x+3,eR.y+16,eR.z-22)};
+  for(const a of u.arms)aimArm(a,a.s<0?ears.L:ears.R,u.k);
+  const half=(eR.x-eL.x)/2;
+  u.head.scale.set(Math.max(50,half-3),105,85);u.head.position.set((eR.x+eL.x)/2,(eL.y+eR.y)/2-8,(eL.z+eR.z)/2-35);
+  if(FACE_TRIS){const a=u.faceOcc.geometry.attributes.position;
+    for(let i=0;i<478;i++){a.array[i*3]=loc[i*3]*.88;a.array[i*3+1]=loc[i*3+1];a.array[i*3+2]=loc[i*3+2]-4;}
+    a.needsUpdate=true;u.faceOcc.visible=true;}
+}
+// triangles of the face mesh, rebuilt from MediaPipe's tessellation edge list
+const FACE_TRIS=(()=>{const E=window.FACEMESH_TESSELATION;if(!E)return null;
+  const adj=Array.from({length:478},()=>new Set());for(const [a,b] of E){adj[a].add(b);adj[b].add(a);}
+  const tris=[];for(let a=0;a<478;a++)for(const b of adj[a])if(b>a)for(const c of adj[b])if(c>b&&adj[a].has(c))tris.push(a,b,c);
+  return tris;})();
 let glSize='';
 function render3D(f,p,W,H){
   const G=gl();if(!G)return false;
@@ -211,7 +260,7 @@ function render3D(f,p,W,H){
     G.cam.left=0;G.cam.right=W;G.cam.top=0;G.cam.bottom=-H;G.cam.updateProjectionMatrix();}
   G.scene.clear();
   if(f){let m=models.get(f.id);if(!m){m=buildModel(f);models.set(f.id,m);}
-    m.position.set(p.cx,-p.cy,0);m.scale.setScalar(p.pxmm);m.quaternion.copy(p.q);G.scene.add(m);}
+    fitModel(m,p.loc||null);m.position.set(p.cx,-p.cy,0);m.scale.setScalar(p.pxmm);m.quaternion.copy(p.q);G.scene.add(m);}
   G.r.render(G.scene,G.cam);return true;
 }
 function clear3D(){const G=gl();if(G){G.scene.clear();G.r.clear();}}
@@ -233,7 +282,11 @@ function derive(lm,w,h){
   const chin=Math.acos((va.x*vb.x+va.y*vb.y)/(Math.hypot(va.x,va.y)*Math.hypot(vb.x,vb.y)))*180/Math.PI;
   let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;for(const l of lm){const X=l.x*w,Y=l.y*h;if(X<x0)x0=X;if(X>x1)x1=X;if(Y<y0)y0=Y;if(Y>y1)y1=Y;}
   const pitchDeg=Math.atan2(u0.z,u0.y)*180/Math.PI;
-  return{mid:{x:(iA.x+iB.x)/2,y:(iA.y+iB.y)/2},iris,pupilPx,q,cheek,jaw,fore,len,chin,box:{x:x0,y:y0,w:x1-x0,h:y1-y0},pitchDeg,
+  // every landmark in head-local coordinates (source px, origin between the pupils, head pose removed)
+  const inv=q.clone().invert(),mx=(iA.x+iB.x)/2,my=(iA.y+iB.y)/2,mz=(iA.z+iB.z)/2,locPx=new Float32Array(lm.length*3),t=new V3();
+  for(let i=0;i<lm.length;i++){t.set(lm[i].x*w-mx,-(lm[i].y*h-my),-(lm[i].z*w-mz)).applyQuaternion(inv);locPx[i*3]=t.x;locPx[i*3+1]=t.y;locPx[i*3+2]=t.z;}
+  const e=new THREE.Euler().setFromQuaternion(q,'YXZ');
+  return{mid:{x:mx,y:my},iris,pupilPx,q,cheek,jaw,fore,len,chin,box:{x:x0,y:y0,w:x1-x0,h:y1-y0},pitchDeg,locPx,yaw:e.y,pitch:e.x,
     pdMm:pupilPx/(iris/IRIS_MM)};
 }
 const pdManual=()=>{const v=+$('pd').value;return v>=45&&v<=80?v:0};
@@ -241,26 +294,44 @@ function scaleOf(n){const pd=pdManual();return pd?n.pupilPx/pd:n.iris/IRIS_MM;} 
 // light adaptive smoothing: steady when still, quick when moving
 function smoothPose(n){
   const px=scaleOf(n);
-  if(!pose){pose={mid:{...n.mid},pxmm:px,q:n.q.clone(),iris:n.iris};return;}
+  const N=n.locPx.length,cur=new Float32Array(N);for(let i=0;i<N;i++)cur[i]=n.locPx[i]/px;
+  if(!pose){pose={mid:{...n.mid},pxmm:px,q:n.q.clone(),iris:n.iris,loc:cur};return;}
+  for(let i=0;i<N;i++)pose.loc[i]+=(cur[i]-pose.loc[i])*.25;
   const sp=Math.hypot(n.mid.x-pose.mid.x,n.mid.y-pose.mid.y)/Math.max(1,pose.iris),a=Math.min(.9,.3+sp*.5);
   pose.mid.x+=(n.mid.x-pose.mid.x)*a;pose.mid.y+=(n.mid.y-pose.mid.y)*a;
   pose.pxmm+=(px-pose.pxmm)*Math.min(a,.25);pose.iris+=(n.iris-pose.iris)*.3;pose.q.slerp(n.q,a);
 }
 
+/* ---------- face-shape measurement ----------
+   The face outline (MediaPipe's 36-point face oval) is taken in head-local millimetres, so head turn and tilt
+   don't distort it. From it: length, the width profile from forehead to chin, and the jaw-corner angle. */
+const OVAL=(()=>{const E=window.FACEMESH_FACE_OVAL;if(!E)return null;const nx=new Map();for(const [a,b] of E){if(!nx.has(a))nx.set(a,[]);if(!nx.has(b))nx.set(b,[]);nx.get(a).push(b);nx.get(b).push(a);}
+  const out=[10];let prev=-1,cur=10;for(let k=0;k<64;k++){const n=nx.get(cur).find(v=>v!==prev);if(n===10||n==null)break;out.push(n);prev=cur;cur=n;}return out;})();
+function shapeFeatures(loc){
+  const X=i=>loc[i*3],Y=i=>loc[i*3+1],poly=OVAL.map(i=>[X(i),Y(i)]),top=Y(10),bot=Y(152),L=top-bot;
+  const widthAt=t=>{const y=top-t*L;let lo=1e9,hi=-1e9;for(let k=0;k<poly.length;k++){const [x1,y1]=poly[k],[x2,y2]=poly[(k+1)%poly.length];
+    if((y1-y)*(y2-y)<=0&&y1!==y2){const x=x1+(y-y1)/(y2-y1)*(x2-x1);if(x<lo)lo=x;if(x>hi)hi=x;}}return hi>lo?hi-lo:0;};
+  const prof=[];for(let t=.05;t<.96;t+=.05)prof.push(widthAt(t));
+  const W=Math.max(...prof),tmax=(prof.indexOf(W)+1)*.05;
+  const ang=(a,b,c)=>{const v1=[X(a)-X(b),Y(a)-Y(b)],v2=[X(c)-X(b),Y(c)-Y(b)];return Math.acos((v1[0]*v2[0]+v1[1]*v2[1])/(Math.hypot(...v1)*Math.hypot(...v2)))*180/Math.PI;};
+  const jawAng=(ang(234,172,152)+ang(454,397,152))/2;
+  return{L,W,R:L/W,F:widthAt(.15)/W,J:widthAt(.72)/W,Ch:widthAt(.88)/W,tmax,jawAng,fore:widthAt(.15),jaw:widthAt(.72),prof:prof.map(v=>v/W),poly:poly.map(([x,y])=>[x/W,(y-top)/W])};
+}
 /* ---------- analysis: face shape, skin tone, PD ---------- */
 let samples=[],pdHist=[],analysed=false;
 const med=a=>{const s=[...a].sort((x,y)=>x-y);return s[s.length>>1]};
-function classify(m){
-  // thresholds calibrated on MediaPipe's 478-point mesh (forehead point 10 sits below the hairline)
-  const{r,jc,fj,cf,chin}=m;let shape='oval';
-  if(r>1.36)shape='oblong';
-  else if(r<1.2&&jc>=.84)shape='square';
-  else if(r<1.13&&jc<.84&&chin>158)shape='round';
-  else if(fj>1.22&&chin<158)shape='heart';
-  else if(cf>1.3&&cheek_jaw(m)>1.34)shape='diamond';
-  return shape;
+// Each shape is a typical point in (length/width, forehead, jaw, chin widths, jaw-corner angle); the face gets a
+// closeness score to every shape, so in-between faces read as a mix instead of being forced into one box.
+const PROTO={oval:[1.22,.93,.80,.53,142],round:[1.06,.93,.84,.58,146],square:[1.10,.96,.88,.60,133],
+  oblong:[1.38,.94,.84,.55,140],heart:[1.18,.98,.76,.48,143],diamond:[1.22,.86,.77,.50,142]};
+const SIG=[.07,.03,.03,.03,4];
+function classifyMix(f){
+  const v=[f.R,f.F,f.J,f.Ch,f.jawAng],e={};let tot=0;
+  for(const k of SHAPES){const d2=PROTO[k].reduce((a,p,i)=>a+((v[i]-p)/SIG[i])**2,0);e[k]=Math.exp(-d2/3);tot+=e[k];}
+  const mix={};for(const k of SHAPES)mix[k]=e[k]/tot;
+  const shape=SHAPES.reduce((a,b)=>mix[b]>mix[a]?b:a);
+  return{mix,shape};
 }
-const cheek_jaw=m=>m.cj;
 function sampleSkin(lm,w,h,iris){
   const oc=document.createElement('canvas');oc.width=w;oc.height=h;const c=oc.getContext('2d',{willReadFrequently:true});
   c.drawImage(mode==='live'?video:srcImg,0,0,w,h);
@@ -277,22 +348,26 @@ const NEED=30;
 function addSample(n,lm,w,h){
   pdHist.push(n.pdMm);if(pdHist.length>60)pdHist.shift();
   if(analysed)return;
-  samples.push({r:n.len/n.cheek,jc:n.jaw/n.cheek,fj:n.fore/n.jaw,cf:n.cheek/n.fore,cj:n.cheek/n.jaw,chin:n.chin,pitch:n.pitchDeg});
-  const need=mode==='image'?1:NEED;
-  if(samples.length<need){status('Hold still: reading face shape and skin tone… '+Math.round(samples.length/need*100)+'%');return;}
-  const m={};for(const k of Object.keys(samples[0]))m[k]=med(samples.map(s=>s[k]));
-  const shape=classify(m),skin=sampleSkin(lm,w,h,n.iris);
-  analysed=true;
-  face={faceMm:n.cheek/scaleOf(n),m};
-  profile.shape=shape;$('detShape').hidden=false;
+  const live=mode==='live';
+  if(live&&(Math.abs(n.yaw)>.38||Math.abs(n.pitch)>.4)){status('Look straight at the camera to measure the face shape…');return;}
+  const sc=scaleOf(n),loc=n.locPx.map(v=>v/sc),f=shapeFeatures(loc);
+  samples.push(f);
+  const need=live?NEED:1;
+  if(samples.length<need){status('Hold still: measuring face shape and skin tone… '+Math.round(samples.length/need*100)+'%');return;}
+  const m={};for(const k of['L','W','R','F','J','Ch','jawAng','fore','jaw','tmax'])m[k]=med(samples.map(s=>s[k]));
+  m.poly=f.poly;const{mix,shape}=classifyMix(m),skin=sampleSkin(lm,w,h,n.iris);
+  analysed=true;face={faceMm:m.W,m};
+  profile.shape=shape;profile.mix=mix;profile.trace=m.poly;$('detShape').hidden=false;
   if(skin){profile.tone=skin.tone;profile.depth=skin.depth;profile.skin=skin.hex;$('detTone').hidden=false;$('detDepth').hidden=false;}
-  $('measureBody').innerHTML=`<p>Face length to cheek width ${m.r.toFixed(2)} · jaw to cheek ${m.jc.toFixed(2)} · forehead to jaw ${m.fj.toFixed(2)} · chin angle ${Math.round(m.chin)}° · face width ${Math.round(face.faceMm)} mm.</p>`+
+  const top=SHAPES.slice().sort((a,b)=>mix[b]-mix[a]);
+  $('measureBody').innerHTML=`<p>Face ${Math.round(m.W)} mm wide × ${Math.round(m.L)} mm long (eyebrow-line forehead to chin) · forehead ${Math.round(m.fore)} mm · jaw ${Math.round(m.jaw)} mm · jaw-corner angle ${Math.round(m.jawAng)}° · widest at ${Math.round(m.tmax*100)}% down the face.</p>`+
+    `<p>Ratios: length/width ${m.R.toFixed(2)} · forehead ${m.F.toFixed(2)} · jaw ${m.J.toFixed(2)} · chin ${m.Ch.toFixed(2)} (of max width). Shape mix: ${top.map(k=>k+' '+Math.round(mix[k]*100)+'%').join(', ')}.</p>`+
     (skin?`<p>Skin colour ${esc(skin.hex)} · lightness ${skin.lab.L.toFixed(0)} · ITA ${skin.ita.toFixed(0)}° (depth) · hue ${skin.hue.toFixed(0)}° (undertone).</p>`:'')+
-    `<p>Rough rules on a 478-point face mesh, averaged over ${samples.length} frame${samples.length>1?'s':''}. Lighting and camera white balance shift the colour reading, so staff should confirm or correct with the buttons above. Everything runs on this device.</p>`;
-  status('Detected '+shape+' face'+(skin?', '+skin.tone+' undertone, '+skin.depth+' skin depth':'')+'. Correct anything that looks off, and tap any frame to try it on.');
+    `<p>Measured on the 3D face mesh with head turn and tilt removed, ${live?'as the median of '+samples.length+' frames':'from one photo'}. Millimetres come from the iris (or the PD entered above). Lighting and white balance shift the colour reading, so staff should confirm or correct.</p>`;
+  status('Measured: '+top.slice(0,2).map(k=>k+' '+Math.round(mix[k]*100)+'%').join(', ')+(skin?' · '+skin.tone+' undertone, '+skin.depth+' skin depth':'')+'. Tap any frame to try it on.');
   $('rescan').hidden=false;selected=null;renderProfile();render();
 }
-function rescan(){samples=[];analysed=false;face=null;}
+function rescan(){samples=[];analysed=false;face=null;profile.mix=null;profile.trace=null;}
 $('rescan').addEventListener('click',()=>{rescan();if(mode==='image'&&srcImg)runImage();});
 
 /* ---------- tracking ---------- */
@@ -388,7 +463,7 @@ function drawStage(){
     c.drawImage(srcImg,ox,oy,iw*s,ih*s);}
   if(!f||!pose){clear3D();return;}
   const cx=ox+pose.mid.x*s,cy=oy+pose.mid.y*s,pxmm=pose.pxmm*s;
-  if(render3D(f,{cx,cy,pxmm,q:pose.q},W,H))return;
+  if(render3D(f,{cx,cy,pxmm,q:pose.q,loc:pose.loc},W,H))return;
   const e=new THREE.Euler().setFromQuaternion(pose.q,'ZYX');drawAny(c,f,cx,cy,frameMm(f)*pxmm,-e.z,Math.cos(e.y),Math.max(1,pxmm*1.2));
 }
 function setSpin(on){spinning=on;$('spin').setAttribute('aria-pressed',on);$('spin').textContent=on?'Stop 3D view':'3D view';cancelAnimationFrame(raf);
@@ -420,8 +495,8 @@ function coverage(f,plan){
   const oop=Math.round(over*(1-plan.disc/100));return{oop,full:false,label:'$'+oop+' out of pocket'};
 }
 function score(f){
-  const why=[];let s=FIT[profile.shape][f.shape]??0;
-  if(s>=1)why.push(FRAME_LABEL[f.shape]+': '+WHY_SHAPE[profile.shape]);else if(s<0)why.push(FRAME_LABEL[f.shape]+' can exaggerate a '+profile.shape+' face');
+  const why=[];let s=profile.mix?SHAPES.reduce((a,k)=>a+profile.mix[k]*(FIT[k][f.shape]??0),0):(FIT[profile.shape][f.shape]??0);
+  if(s>=.8)why.push(FRAME_LABEL[f.shape]+': '+WHY_SHAPE[profile.shape]);else if(s<-.5)why.push(FRAME_LABEL[f.shape]+' can exaggerate a '+profile.shape+' face');
   let col=0;
   if(f.tone==='neutral'){col=1;}
   else if(profile.tone==='neutral'){col=1.5;}
@@ -465,11 +540,13 @@ function render(){
 function chips(el,key,vals){
   $(el).innerHTML=vals.map(v=>`<button class="chip" aria-pressed="${profile[key]===v}" data-k="${key}" data-v="${v}">${v[0].toUpperCase()+v.slice(1)}</button>`).join('');
 }
-function renderProfile(){chips('shapeChips','shape',SHAPES);chips('toneChips','tone',['warm','neutral','cool']);chips('depthChips','depth',['light','medium','deep']);
+function renderProfile(){chips('shapeChips','shape',SHAPES);
+  const mx=profile.mix;$('shapeMix').innerHTML=mx?SHAPES.slice().sort((a,b)=>mx[b]-mx[a]).map(k=>`<div class="mixrow"><span>${k[0].toUpperCase()+k.slice(1)}</span><i style="width:${Math.round(mx[k]*100)}%"></i><b>${Math.round(mx[k]*100)}%</b></div>`).join(''):'';
+  const tr=profile.trace;$('faceTrace').innerHTML=tr?`<path d="M${tr.map(([x,y])=>(x*100+60).toFixed(1)+' '+(-y*100+8).toFixed(1)).join('L')}Z"/>`:'';tr?$('faceTrace').removeAttribute('hidden'):$('faceTrace').setAttribute('hidden','');chips('toneChips','tone',['warm','neutral','cool']);chips('depthChips','depth',['light','medium','deep']);
   $('skinSwatch').style.background=profile.skin||SKIN[profile.depth][profile.tone];}
 document.addEventListener('click',e=>{
   const ch=e.target.closest('.chip');
-  if(ch){profile[ch.dataset.k]=ch.dataset.v;$('det'+{shape:'Shape',tone:'Tone',depth:'Depth'}[ch.dataset.k]).hidden=true;if(ch.dataset.k!=='shape'&&!face)profile.skin=null;renderProfile();render();return;}
+  if(ch){profile[ch.dataset.k]=ch.dataset.v;if(ch.dataset.k==='shape')profile.mix=null;$('det'+{shape:'Shape',tone:'Tone',depth:'Depth'}[ch.dataset.k]).hidden=true;if(ch.dataset.k!=='shape'&&!face)profile.skin=null;renderProfile();render();return;}
   const tr=e.target.closest('[data-try]')||e.target.closest('.card');
   if(tr&&e.target.closest('#rack')){selected=tr.dataset.try||tr.dataset.id;render();if(window.innerWidth<900)$('stage').scrollIntoView({behavior:'smooth',block:'start'});}
 });

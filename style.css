@@ -111,3 +111,10 @@ pre,.scroll{overflow-x:auto}
 .modal .row{display:flex;gap:10px}
 .modal a,.modal button{background:#fff;color:#111}
 .hint{font-size:13px;color:var(--mute)}
+.shapebox{display:flex;gap:16px;align-items:center;margin-top:10px}
+#shapeMix{flex:1;display:grid;gap:4px}
+.mixrow{display:grid;grid-template-columns:72px minmax(0,1fr) 40px;gap:8px;align-items:center;font-size:13px}
+.mixrow i{display:block;height:8px;border-radius:4px;background:var(--acc)}
+.mixrow b{font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+#faceTrace{width:90px;height:112px;flex:none}
+#faceTrace path{fill:var(--accbg);stroke:var(--acc);stroke-width:1.5}
