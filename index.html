@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Frame Match</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="band top wrap">
+  <div>
+    <h1>Frame match</h1>
+    <p>Live try-on: the camera tracks the patient's face in 3D, ranks the frames this practice has in stock by face shape and skin tone, and shows what their vision plan covers.</p>
+  </div>
+  <span class="sample">Prototype · sample catalog, brands and plan values</span>
+</header>
+
+<main class="band wrap" style="padding-top:20px">
+  <div class="grid">
+    <section aria-label="Try-on and patient profile">
+      <div class="stage" id="stage">
+        <video id="cam" playsinline muted autoplay hidden></video>
+        <canvas id="tryon" aria-label="Try-on preview"></canvas>
+        <canvas id="gl" aria-hidden="true"></canvas>
+        <div class="gate" id="gate">
+          <h2>Try frames on live</h2>
+          <p>The camera view and face tracking run entirely on this device. No video or photo is uploaded or stored.</p>
+          <div class="row">
+            <button class="primary" id="startCam">Start camera</button>
+            <label class="btn" for="photo">Use a photo<input id="photo" type="file" accept="image/*"></label>
+          </div>
+          <button id="skipGate" style="align-self:flex-start">Browse frames without a face</button>
+        </div>
+        <div class="toprow">
+          <span class="pill" id="pdPill" hidden></span>
+          <button class="pill btnpill" id="usePd" hidden>Use this PD</button>
+        </div>
+        <div class="stagebar">
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button id="snap" class="primary" hidden>Snapshot</button>
+            <button id="stopCam" hidden>Stop camera</button>
+            <button id="openGate" hidden>Camera / photo</button>
+            <button id="spin" class="pill btnpill" hidden aria-pressed="false">3D view</button>
+          </div>
+          <span class="pill" id="wearing">Wearing: —</span>
+        </div>
+      </div>
+      <p class="status" id="status" role="status">Start the camera, or use a photo.</p>
+      <div class="shots" id="shots" aria-label="Snapshots"></div>
+
+      <div class="profile">
+        <h2>Patient profile <button id="rescan" hidden style="margin-left:8px;min-height:36px;font-size:14px">Re-scan</button></h2>
+        <div class="prow">
+          <div class="plabel">Face shape <span class="det" id="detShape" hidden>detected</span></div>
+          <div class="chips" id="shapeChips"></div>
+        </div>
+        <div class="prow">
+          <div class="plabel">Undertone <span class="det" id="detTone" hidden>detected</span> <span class="swatch" id="skinSwatch" title="Sampled skin colour"></span></div>
+          <div class="chips" id="toneChips"></div>
+        </div>
+        <div class="prow">
+          <div class="plabel">Skin depth <span class="det" id="detDepth" hidden>detected</span></div>
+          <div class="chips" id="depthChips"></div>
+        </div>
+        <div class="prow">
+          <label class="plabel" for="pd">Pupillary distance (mm)</label>
+          <input id="pd" type="number" min="45" max="80" step="0.5" placeholder="auto" style="width:110px"> <span class="cmeta">Leave empty to size frames from the camera's iris measurement, or enter the optician's measured PD for the most accurate sizing.</span>
+        </div>
+        <details id="measure"><summary>How the scan decided</summary><div id="measureBody">Start the camera or use a photo to see the face measurements and colour reading.</div></details>
+      </div>
+    </section>
+
+    <section aria-label="Recommended frames">
+      <div class="controls">
+        <label>Vision plan<select id="plan"></select></label>
+        <label>Sort by<select id="sort"><option value="match">Best match</option><option value="oop">Lowest out of pocket</option><option value="price">Price</option></select></label>
+        <label class="toggle"><input type="checkbox" id="instock" checked> In stock only</label>
+        <label class="toggle"><input type="checkbox" id="covered"> Fully covered only</label>
+      </div>
+      <p class="count" id="count"></p>
+      <div class="rack" id="rack"></div>
+      <div style="margin-top:12px"><button id="more">Show all frames</button></div>
+    </section>
+  </div>
+</main>
+
+<section class="band settings" aria-label="Practice settings">
+  <div class="wrap">
+    <h2>Practice settings</h2>
+    <p>What the practice fills in once. In the full product these would sync from the practice-management system. Changes stay on this device only.</p>
+    <div class="sgrid">
+      <div>
+        <h3>Vision plans accepted</h3>
+        <p>Frame allowance per plan, and the discount the plan gives on the amount above it.</p>
+        <table class="stack" id="planTable" style="max-width:640px"><thead><tr><th>Plan</th><th class="num">Frame allowance ($)</th><th class="num">Overage discount (%)</th></tr></thead><tbody></tbody></table>
+        <p style="margin-top:14px">"Basic coverage" covers only frames marked as basic-plan frames in the catalog, in full.</p>
+        <button id="reset">Reset sample data</button>
+      </div>
+      <div>
+        <h3>Frame inventory</h3>
+        <p>Add a straight-on front photo and a side photo of each frame on a plain white background, with the size printed inside the arm (lens-bridge-temple, e.g. 52-18-140). The app cuts out the background, reads the colour, and builds a true-scale 3D model. Frames without photos get a generated 3D model.</p>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px"><button id="addFrame">Add a frame</button><span class="status" id="invStatus" role="status" style="margin:10px 0 0"></span></div>
+        <div class="tblwrap"><table class="stack" id="invTable"><thead><tr><th>Photo</th><th>Frame</th><th>Shape</th><th>Size</th><th class="num">Price</th><th class="num">Stock</th></tr></thead><tbody></tbody></table></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script src="vendor/face_mesh/face_mesh.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
